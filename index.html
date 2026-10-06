@@ -20,6 +20,7 @@
     #map {
       height: 100vh;
       width: 100vw;
+      background: #e0e0e0; /* 読み込み前の下地色 */
     }
 
     /* レイヤー切り替えUI */
@@ -91,4 +92,100 @@
   <!-- 現在地ボタン -->
   <button class="location-btn" onclick="moveToCurrentLocation()" title="現在地に移動">
     <svg viewBox="0 0 24 24">
-      <path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3c-.46-4.17-3.77-7.48-7.94-7.94V1h-2v2.06C6.83 3.52 3.52 6.83 3.06 11H1v2h2.06c.46 4.17 3.77 7.48 7.94 7.94V23h2v-2.06c4.17-.46 7.48-3.77 7.94-7.94H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.
+      <path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3c-.46-4.17-3.77-7.48-7.94-7.94V1h-2v2.06C6.83 3.52 3.52 6.83 3.06 11H1v2h2.06c.46 4.17 3.77 7.48 7.94 7.94V23h2v-2.06c4.17-.46 7.48-3.77 7.94-7.94H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/>
+    </svg>
+  </button>
+
+  <script>
+    // 1. 地図の初期化（初期位置：日本全体）
+    const map = L.map('map').setView([36.2048, 138.2529], 5);
+
+    // 2. 背景地図（国土地理院 淡色地図）を確実に描画
+    L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', {
+      attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">国土地理院</a>',
+      maxZoom: 18
+    }).addTo(map);
+
+    let currentKikikuruLayer = null;
+
+    // 最新のキキクル日時を取得してレイヤーを生成する関数
+    async function loadKikikuruLayer(type = 'target_snow') {
+      try {
+        // 気象庁の最新タイムスタンプ（CORS対策でプロキシ経由取得）
+        const targetUrl = encodeURIComponent('https://www.jma.go.jp/bosai/jmatile/data/risk/targetTimes.json');
+        const res = await fetch(`https://api.allorigins.win/get?url=${targetUrl}`);
+        const result = await res.json();
+        const data = JSON.parse(result.contents);
+        
+        const latestTime = data[0].basetime;
+        const validTime = data[0].validtime;
+
+        if (currentKikikuruLayer) {
+          map.removeLayer(currentKikikuruLayer);
+        }
+
+        const tileUrl = `https://www.jma.go.jp/bosai/jmatile/data/risk/${latestTime}/none/${validTime}/surf/${type}/{z}/{x}/{y}.png`;
+
+        currentKikikuruLayer = L.tileLayer(tileUrl, {
+          opacity: 0.75,
+          maxZoom: 15,
+          attribution: '<a href="https://www.jma.go.jp/bosai/risk/" target="_blank">気象庁キキクル</a>'
+        }).addTo(map);
+
+      } catch (err) {
+        console.error("キキクルデータの取得に失敗しました:", err);
+      }
+    }
+
+    function changeKikikuruLayer(type) {
+      loadKikikuruLayer(type);
+    }
+
+    // キキクル初期読み込み
+    loadKikikuruLayer('target_snow');
+
+    // 3. 現在地（GPS）の取得と描画
+    let userMarker = null;
+    let accuracyCircle = null;
+
+    function onLocationFound(e) {
+      const radius = e.accuracy / 2;
+
+      if (userMarker) {
+        map.removeLayer(userMarker);
+        map.removeLayer(accuracyCircle);
+      }
+
+      accuracyCircle = L.circle(e.latlng, radius, {
+        color: '#136AEC',
+        fillColor: '#136AEC',
+        fillOpacity: 0.15,
+        weight: 1
+      }).addTo(map);
+
+      userMarker = L.circleMarker(e.latlng, {
+        radius: 8,
+        fillColor: '#136AEC',
+        color: '#FFFFFF',
+        weight: 3,
+        opacity: 1,
+        fillOpacity: 1
+      }).addTo(map).bindPopup(`現在地（誤差: 約${Math.round(radius)}m）`);
+    }
+
+    function onLocationError(e) {
+      console.warn("位置情報の取得失敗:", e.message);
+    }
+
+    map.on('locationfound', onLocationFound);
+    map.on('locationerror', onLocationError);
+
+    // リアルタイム位置追跡
+    map.locate({ setView: true, maxZoom: 14, watch: true, enableHighAccuracy: true });
+
+    function moveToCurrentLocation() {
+      map.locate({ setView: true, maxZoom: 14, enableHighAccuracy: true });
+    }
+  </script>
+</body>
+</html>
